@@ -1,0 +1,131 @@
+---
+title: "Challenge 3: GEDI AGBD data"
+output: html_notebook
+---
+
+**GEDI L4B AGBD biomass data**
+
+The [GEDI L4B AGB product](https://daac.ornl.gov/GEDI/guides/GEDI_L4B_Gridded_Biomass.html) provides km x 1 km estimates of mean aboveground biomass density (AGBD) based on observations from 2019-04-18 to 2021-08-04. Each waveform is converted to an AGBD prediction based on estimated forest height.
+
+The sample present within the borders of each 1 km cell is used to statistically infer mean The estimate covers the entire area of the 1 km cell, regardless of whether that area is completely forested or not - no forest mask is applied to filter out non-forest waveforms so that non-forest biomass estimates can be included, and the choice of mask may impact the estimates. To obtain a specific estiamte for the forest area, one can divide the mean 1km AGBD by the fraction of the cell that is forested according to their preferred forest map.
+
+The GEDI data has a number of sources of uncertainty, including the sampling of the 1km area (as opposed to making wall-to-wall observations) and the modelling approach of the biomass values.
+
+**Exploring the GEDI data**
+
+Let's start by loading up the libraries we will need to import and interrogate the GEDI biomass data. It is in [GeoTIFF](https://www.ogc.org/standard/geotiff/) format, a file format used in the geospatial and earth science communities for geographic image data. GDAL (the Geospatial Data Abstraction Library) is a major software library for reading/writing raster & vector geospatial data, and forms the basis of most software for processing such data.
+
+Aside:
+
+**Raster** data is any pixelated (or gridded) data where each pixel is associated with a specific geographical location. The value of a pixel can be continuous (e.g. elevation) or categorical (e.g. land use). A geospatial raster differs only a digital photo in that it is accompanied by spatial information that connects the data to a particular location - the spatial extent, cell size, coordinate reference system (CRS), etc. An example of a continuous raster would be maps of tree height derived from LiDAR data, or precipitation maps.
+
+\
+**Vector** data structures represent specific features on the Earth's surface, and assign attributes to those features. They are composed of discrete x,y geometric locations or vertices that define the shape of the spatial object. The organisation of the vertices determines the type of vector that we are working with - these are points (defined by a single x, y coordinate), lines (at least 2 points that are connected) or polygons (3 or more points that are connected and closed).
+
+**How to read in GEDI raster data**
+
+We can explore the data in one of a couple of ways in R. We can use the `raster` package to read and manipulate raster data. The `rgdal` package provides bindings to [GDAL](https://gdal.org/index.html) and access to projection/transformation operations from the 'PROJ.4' library.
+
+```{r,warning=FALSE}
+# Install necessary packages
+if (!require(raster)) install.packages('raster')
+if (!require(rgdal)) install.packages('rgdal')
+
+# Load necessary libraries
+library(raster)
+library(rgdal)
+
+# Read the raster data
+# Replace 'path_to_your_raster_file' with the actual path to your raster file
+raster_path= "/Users/aoibheannbrady/Downloads/GEDI_L4B_Gridded_Biomass_V2_1_2299/data/GEDI04_B_MW019MW223_02_002_02_R01000M_MU.tif"
+raster_data = raster(raster_path)
+
+# Print the raster data to check its structure
+print(raster_data)
+
+```
+
+Note that the extent is in Easting/Northing coordinates rather than latitude and longitude. We'll plot the global raster below.
+
+```{r,message=FALSE}
+if (!require(rasterVis)) install.packages('rasterVis')
+library(rasterVis)
+# Plot the raster data
+levelplot(raster_data)
+
+```
+
+As mentioned, the data in Easting & Northing coordinates [EPSG 6933](https://spatialreference.org/ref/epsg/6933) so we'll want to reproject this now.
+
+```{r}
+# Define the new CRS
+new_crs = "+init=epsg:4326"  # WGS 84
+
+# Reproject the raster data
+reprojected = projectRaster(raster_data, crs = new_crs)
+```
+
+```{r}
+levelplot(reprojected)
+```
+
+Let's now plot a histogram of the data. We get the values from the reprojected raster, then plot.
+
+```{r}
+values = getValues(reprojected)
+hist(values, main = "Histogram of Reprojected Raster Data", xlab = "Values", ylab = "Frequency")
+```
+
+Let's check what the nodata value is.
+
+```{r}
+NAvalue(reprojected)
+```
+
+We'll now filter that out.
+
+```{r}
+reprojected[reprojected <-3e+38] <- NA
+```
+
+Now let's plot it once more to see if the nodata values are gone.
+
+```{r}
+
+levelplot(reprojected)
+```
+
+**Vector data & clipping to boundaries**
+
+The GEDI biomass data layer above is a global layer, which can be hard/slow to visualise in terms of compute. In any case, for our challenge we are interested in the legal Amazon region, so we can clip the dataset to this boundary. This is in another file format, a shapefile, which is a polygon, multipolygon or series of polygons which represent some area. As mentioned, a polygon is a vector data format, which we can read in using `readOGR` which is from the `rgdal` package.
+
+```{r, warnings=FALSE}
+shapefile_path = '/Users/aoibheannbrady/Downloads/Amazon_forest_boundary.gpkg'  # Replace with your shapefile path
+
+# Read the shapefile
+gdf = readOGR(shapefile_path)
+
+
+plot(gdf, main = "Shapefile Plot")
+
+
+```
+
+Now let's clip the raster using the shapefile. We can do this using the `mask` function in the `raster` package to do this.
+
+```{r}
+clipped = mask(reprojected, gdf)
+```
+
+We should now have data only in the Amazon, let's check!
+
+```{r}
+levelplot(clipped)
+```
+
+Let's check that all our NA values are gone.
+
+```{r}
+values = getValues(clipped)
+hist(values, main = "Histogram of Reprojected Raster Data", xlab = "Values", ylab = "Frequency")
+```
